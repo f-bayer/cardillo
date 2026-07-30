@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from skhippr.equations.EquationSystem import EquationSystem
 from skhippr.solvers.newton import NewtonSolver
 from skhippr.odes.AbstractODE import AbstractODE
+from skhippr_tmp.AbstractODE import AbstractDAE
 
 # --- Continuation ---
 from skhippr.solvers.continuation import pseudo_arclength_continuator, BranchPoint
@@ -69,14 +70,23 @@ def F_fun(t):
     return -0.5 + t
 
 
-class TrussCardilloSkhipprInterface(AbstractODE):
+class TrussCardilloSkhipprInterface(AbstractDAE):
     def __init__(self, cardillo_system):
-        super().__init__(autonomous=True, n_dof=cardillo_system.nq + cardillo_system.nu)
+        super().__init__(
+            autonomous=True,
+            n_dof=cardillo_system.nq + cardillo_system.nu,
+            stability_method=None,
+            M_is_constant=True,
+            invertible=True,
+        )
         self.t = cardillo_system.t0
         self.x = np.concatenate([cardillo_system.q0, cardillo_system.u0])
         self.cardillo_system = cardillo_system
         self._nq = cardillo_system.nq
         self._nu = cardillo_system.nu
+
+    def M_small(self, t=None, x=None):
+        return np.eye(self.n_dof)
 
     def dynamics(self, t=None, x=None):
         if x is None:
