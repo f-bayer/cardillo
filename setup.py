@@ -3,9 +3,7 @@ from setuptools import setup, find_packages
 name = "cardillo"
 version = "1.0.0"
 author = "Jonas Breuling, Giuseppe Capobianco, Lisa Eberhardt, Simon Eugster"
-author_email = (
-    "breuling@inm.uni-stuttgart.de, giuseppe.capobianco@fau.de, eberhardt@inm.uni-stuttgart.de, s.r.eugster@tue.nl",
-)
+author_email = "breuling@inm.uni-stuttgart.de, giuseppe.capobianco@fau.de, eberhardt@inm.uni-stuttgart.de, s.r.eugster@tue.nl"
 url = ""
 description = "Python package for flexible multibody dynamic problems."
 long_description = ""
@@ -31,6 +29,7 @@ setup(
         "vtk>=9.3.0",
         "scipy_dae>=0.1.0",
         "urdf_parser_py",
+        "skhippr @ git+https://github.com/inm-unistuttgart/SKHiPPR.git",
     ],
     packages=find_packages(),
     python_requires=">=3.10",
