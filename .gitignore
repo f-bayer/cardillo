@@ -52,4 +52,5 @@ examples/results
 
 # virtual environment
 myvenv
+.venv
 

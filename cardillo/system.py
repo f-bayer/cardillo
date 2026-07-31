@@ -833,3 +833,9 @@ class System:
                 t, q[contr.qDOF], la_F[contr.la_FDOF]
             )
         return coo.asformat(format)
+
+    # for skhippr
+    def set_parameter(self, p):
+        for contr in self.contributions:
+            if hasattr(contr, "set_parameter"):
+                contr.set_parameter(p)
