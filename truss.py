@@ -18,9 +18,15 @@ from skhippr.solvers.continuation import pseudo_arclength_continuator, BranchPoi
 # --- Visualization ---
 from skhippr.visualization.continuation import plot_continuation
 from skhippr.visualization.equilibria import plot_equilibrium, plot_eigenvalues
-import numpy as np
+
 
 from cardillo import System
+from cardillo.discrete import RigidBody, PointMass
+from cardillo.constraints import Prismatic
+from cardillo.constraints._base import ProjectedPositionOrientationBase
+from cardillo.force_laws import Spring, KelvinVoigtElement
+from cardillo.interactions import TwoPointInteraction
+from cardillo.forces import Force
 
 
 class TrussSubSystem:
@@ -75,15 +81,33 @@ def F_fun(t):
 
 class TrussCardilloSkhipprInterface(AbstractDAE):
     def __init__(self, cardillo_system, param):
+        self.split_x = np.cumsum(
+            np.array(
+                [
+                    cardillo_system.nq,
+                    cardillo_system.nu,
+                    cardillo_system.nla_g,
+                    cardillo_system.nla_S,
+                ],
+                dtype=int,
+            )
+        )
+
+        n_dof = self.split_x[-1]
+        self.split_x = self.split_x[:-1]
+
         super().__init__(
             autonomous=True,
-            n_dof=cardillo_system.nq + cardillo_system.nu,
+            n_dof=n_dof,
             stability_method=None,
             M_is_constant=True,
             invertible=True,
         )
         self.t = cardillo_system.t0
-        self.x = np.concatenate([cardillo_system.q0, cardillo_system.u0])
+        la_S0 = np.zeros(cardillo_system.nla_S)
+        self.x = np.concatenate(
+            [cardillo_system.q0, cardillo_system.u0, cardillo_system.la_g0, la_S0]
+        )
         self.cardillo_system = cardillo_system
         self._nq = cardillo_system.nq
         self._nu = cardillo_system.nu
@@ -105,10 +129,17 @@ class TrussCardilloSkhipprInterface(AbstractDAE):
         if t is None:
             t = self.t
         self.check_dimensions(t, x)
+        M_ret = np.zeros((self.n_dof, self.n_dof))
+
         q = x[: self._nq]
-        m1 = np.eye(self._nq)
+
         M = self.cardillo_system.M(t, q).toarray()
-        return np.block([[m1, None], [None, M]])
+
+        M_ret[: self.split_x[0], : self.split_x[0]] = np.eye(self._nq)
+
+        M_ret[self.split_x[0] : self.split_x[1], self.split_x[0] : self.split_x[1]] = M
+
+        return M_ret
 
     def dynamics(self, t=None, x=None):
         if x is None:
@@ -117,10 +148,18 @@ class TrussCardilloSkhipprInterface(AbstractDAE):
             t = self.t
         self.check_dimensions(t, x)
 
-        q, u = x[: self._nq], x[self._nq :]
-        q_dot = self.cardillo_system.q_dot(t, q, u)
-        h = self.cardillo_system.h(t, q, u)
-        return np.concatenate([q_dot, h])
+        q, u, la_g, la_S = np.array_split(x, self.split_x)
+
+        q_dot = (
+            self.cardillo_system.q_dot(t, q, u)
+            + self.cardillo_system.g_S_q(t, q, format="csc").T @ la_S
+        )
+        W_g = self.cardillo_system.W_g(t, q, format="csr")
+
+        h = self.cardillo_system.h(t, q, u) + W_g @ la_g
+        g = self.cardillo_system.g(t, q)
+        g_S = self.cardillo_system.g_S(t, q)
+        return np.concatenate([q_dot, h, g, g_S])
 
     def df_dx(self, t=None, x=None):
         if x is None:
@@ -128,13 +167,32 @@ class TrussCardilloSkhipprInterface(AbstractDAE):
         if t is None:
             t = self.t
 
-        q, u = x[: self._nq], x[self._nq :]
+        q, u, la_g, la_S = np.array_split(x, self.split_x)
+        W_g = self.cardillo_system.W_g(t, q).toarray()
 
+        g_S_q = self.cardillo_system.g_S_q(t, q)
         f_x = np.zeros((self.n_dof, self.n_dof))
-        f_x[: self._nq, : self._nq] = self.cardillo_system.q_dot_q(t, q, u).toarray()
-        f_x[: self._nq, self._nq :] = self.cardillo_system.q_dot_u(t, q).toarray()
-        f_x[self._nq :, : self._nq] = self.cardillo_system.h_q(t, q, u).toarray()
-        f_x[self._nq :, self._nq :] = self.cardillo_system.h_u(t, q, u).toarray()
+        split_x = self.split_x
+        # TODO: the derivative of g_S_q.T @ la_S w.r.t q is missing below
+        f_x[: split_x[0], : split_x[0]] = self.cardillo_system.q_dot_q(
+            t, q, u
+        ).toarray()
+        f_x[: split_x[0], split_x[0] : split_x[1]] = self.cardillo_system.q_dot_u(
+            t, q
+        ).toarray()
+        f_x[: split_x[0], split_x[2] :] = g_S_q.T.toarray()
+        f_x[split_x[0] : split_x[1], : split_x[0]] = (
+            self.cardillo_system.h_q(t, q, u).toarray()
+            + self.cardillo_system.Wla_g_q(t, q, la_g).toarray()
+        )
+        f_x[split_x[0] : split_x[1], split_x[0] : split_x[1]] = (
+            self.cardillo_system.h_u(t, q, u).toarray()
+        )
+        f_x[split_x[0] : split_x[1], split_x[1] : split_x[2]] = W_g
+        f_x[split_x[1] : split_x[2], : split_x[0]] = self.cardillo_system.g_q(
+            t, q
+        ).toarray()
+        f_x[split_x[2] :, : split_x[0]] = g_S_q.toarray()
         return f_x
 
     def closed_form_derivative(self, variable, t=None, x=None):
@@ -163,19 +221,44 @@ class TrussCardilloSkhipprInterface(AbstractDAE):
 
 
 def main():
-    truss_subsystem = TrussSubSystem(
-        k=3.0,
-        l0=1.2,
-        a=1.0,
-        F=0.0,
-        c=0.5,
-        m=1.0,
-        q0=np.array([-1.0]),
-        u0=np.array([0.0]),
-    )
+    a = 1.0
+    mass = 1.0
+    l0 = 1.2
+    k_spring = 3.0
+    d_damper = 0.5
 
     cardillo_system = System()
-    cardillo_system.add(truss_subsystem)
+
+    # rigid body
+    # rb = PointMass(mass=mass)
+    # con = ProjectedPositionOrientationBase(cardillo_system.origin, rb, [1, 2], [])
+
+    rb = RigidBody(mass, B_Theta_C=np.eye(3))
+    con = Prismatic(cardillo_system.origin, rb, axis=0)
+
+    # spring
+    inter_spring = TwoPointInteraction(
+        cardillo_system.origin, rb, B_r_CP1=np.array([0, 0, a])
+    )
+    spring = Spring(inter_spring, k=k_spring, l_ref=l0, compliance_form=False)
+
+    # damper
+    inter_damper = TwoPointInteraction(
+        cardillo_system.origin, rb, B_r_CP1=np.array([a, 0, 0])
+    )
+    damper = KelvinVoigtElement(inter_damper, k=0.0, d=d_damper, compliance_form=False)
+
+    # force
+    force = Force(np.zeros(3), rb)
+
+    cardillo_system.add(rb, con, spring, damper, force)
+
+    # handle force parameter update for skhippr
+    def set_force_parameter(F):
+        force.force = lambda t, F=F: np.array([F, 0, 0]) * np.cos(2 * np.pi * t)
+
+    force.set_parameter = set_force_parameter
+
     cardillo_system.assemble()
 
     # truss_interface = TrussCardilloSkhipprInterface(cardillo_system)
@@ -195,20 +278,22 @@ def main():
     """
     # --- Instantiation of the ODE at initial point ---
     # ode = Truss(x=[1.0, 2.0], F=-0.5, a=1.0, l_0=1.2, k=3.0, m=1.0, c=0.5)
-    ode = TrussCardilloSkhipprInterface(cardillo_system, -0.5)
+    cardillo_interface = TrussCardilloSkhipprInterface(cardillo_system, -0.5)
     solver = NewtonSolver(verbose=True)
 
     # --- ODEs can be packed into an EquationSystem for solving ---
     equation_sys = EquationSystem(
-        equations=[ode], unknowns=["x"], equation_determining_stability=ode
+        equations=[cardillo_interface],
+        unknowns=["x"],
+        equation_determining_stability=cardillo_interface,
     )
     solver.solve(equation_sys)
 
     # --- or passed to a solver directly using a different method ---
-    solver.solve_equation(equation=ode, unknown="x")
+    solver.solve_equation(equation=cardillo_interface, unknown="x")
 
     # --- Standard SKHiPPR visualization calls create and return new figures for each plot ---
-    plot_equilibrium(ode=ode)
+    plot_equilibrium(ode=cardillo_interface, idx=[0, cardillo_interface.n_dof - 5])
 
     # --- SKHiPPR visualization methods accept EquationSystem objects that contain an AbstractODE as well ---
     plot_eigenvalues(ode=equation_sys)
@@ -231,8 +316,11 @@ def main():
         if branch_point.param > 0.5:
             break
 
+    def plot_fun(bp):
+        return (bp.equations[0].x[0], bp.equations[0].x[cardillo_interface.n_dof - 5])
+
     # --- Plot the continuation curve ---
-    plot_continuation(branch, marker="x")
+    plot_continuation(branch, marker="x", plot_fun=plot_fun)
 
 
 if __name__ == "__main__":

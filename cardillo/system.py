@@ -836,6 +836,7 @@ class System:
 
     # for skhippr
     def set_parameter(self, p):
+        p = np.squeeze(p)
         for contr in self.contributions:
             if hasattr(contr, "set_parameter"):
                 contr.set_parameter(p)
