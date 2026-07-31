@@ -18,6 +18,9 @@ from skhippr.solvers.continuation import pseudo_arclength_continuator, BranchPoi
 # --- Visualization ---
 from skhippr.visualization.continuation import plot_continuation
 from skhippr.visualization.equilibria import plot_equilibrium, plot_eigenvalues
+from skhippr.visualization.cycles import plot_period, plot_phase
+from skhippr.Fourier import Fourier
+from skhippr_tmp.hbm import HBMEquationDAE
 
 
 from cardillo import System
@@ -255,7 +258,7 @@ def main():
 
     # handle force parameter update for skhippr
     def set_force_parameter(F):
-        force.force = lambda t, F=F: np.array([F, 0, 0]) * np.cos(2 * np.pi * t)
+        force.force = lambda t, F=F: np.array([F * np.sin(2 * np.pi * t) - 0.5, 0, 0])
 
     force.set_parameter = set_force_parameter
 
@@ -279,24 +282,55 @@ def main():
     # --- Instantiation of the ODE at initial point ---
     # ode = Truss(x=[1.0, 2.0], F=-0.5, a=1.0, l_0=1.2, k=3.0, m=1.0, c=0.5)
     cardillo_interface = TrussCardilloSkhipprInterface(cardillo_system, -0.5)
-    solver = NewtonSolver(verbose=True)
+    cardillo_interface.param = 0.0
 
-    # --- ODEs can be packed into an EquationSystem for solving ---
-    equation_sys = EquationSystem(
-        equations=[cardillo_interface],
-        unknowns=["x"],
-        equation_determining_stability=cardillo_interface,
-    )
-    solver.solve(equation_sys)
+    solver = NewtonSolver(verbose=True)
 
     # --- or passed to a solver directly using a different method ---
     solver.solve_equation(equation=cardillo_interface, unknown="x")
 
-    # --- Standard SKHiPPR visualization calls create and return new figures for each plot ---
-    plot_equilibrium(ode=cardillo_interface, idx=[0, cardillo_interface.n_dof - 5])
+    # --- Try HBM ---
+    n_hbm = 5
+    l_dft = 2048
+    fourier = Fourier(
+        n_hbm,
+        l_dft,
+        cardillo_interface.n_dof,
+    )
+    initial_guess = np.zeros(
+        cardillo_interface.n_dof * (2 * n_hbm + 1)
+    ) + 1e-3 * np.random.rand(cardillo_interface.n_dof * (2 * n_hbm + 1))
+    # initial_guess[0] = -1
+    initial_guess[: cardillo_interface.n_dof] = cardillo_interface.x
 
-    # --- SKHiPPR visualization methods accept EquationSystem objects that contain an AbstractODE as well ---
-    plot_eigenvalues(ode=equation_sys)
+    hbm_dae = HBMEquationDAE(
+        cardillo_interface,
+        2 * np.pi,
+        fourier,
+        initial_guess=initial_guess,
+        stability_method=None,
+    )
+
+    # --- ODEs can be packed into an EquationSystem for solving ---
+    equation_sys = EquationSystem(
+        equations=[hbm_dae],
+        unknowns=["X"],
+        equation_determining_stability=hbm_dae,
+    )
+    solver.solve(equation_sys)
+
+    # TODO: fix bug below before use
+    # plot_period(hbm_dae)
+    # plot_phase(hbm_dae, [0, cardillo_interface._nq])
+
+    # # --- or passed to a solver directly using a different method ---
+    # solver.solve_equation(equation=hbm_dae, unknown="X")
+
+    # # --- Standard SKHiPPR visualization calls create and return new figures for each plot ---
+    # plot_equilibrium(ode=cardillo_interface, idx=[0, cardillo_interface.n_dof - 5])
+
+    # # --- SKHiPPR visualization methods accept EquationSystem objects that contain an AbstractODE as well ---
+    # plot_eigenvalues(ode=equation_sys)
 
     branch: list[BranchPoint] = []
 
