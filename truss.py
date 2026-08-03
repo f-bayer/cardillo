@@ -266,32 +266,19 @@ def main():
 
     # truss_interface = TrussCardilloSkhipprInterface(cardillo_system)
 
-    """
-    Demonstrates solving an equation for an equilibrium and visualizes the equilibrium as well as its eigenvalues using SKHiPPR visualization methods.
-    Performs continuation over the parameter `F` and then visualizes the branch with its stability intervals.
-
-    This function instantiates a :py:class:`~skhippr.odes.autonomous.Truss` object as a subclass of :py:class:`~skhippr.odes.AbstractODE.AbstractODE` and solves it with either :py:func:`skhippr.solvers.newton.NewtonSolver.solve_equation` or with :py:func:`skhippr.solvers.newton.NewtonSolver.solve` after embedding it into an :py:class:`~skhippr.equations.EquationSystem.EquationSystem`.
-
-    It generates 3 figures:
-
-    #. A plot of the ode equilibrium
-    #. A plot of the equilibrium eigenvalues visualizing its stability
-    #. A continuation plot highlighting the fold bifurcations inherent to the system.
-
-    """
-    # --- Instantiation of the ODE at initial point ---
+    # --- Instantiation of the DAE at initial point ---
     # ode = Truss(x=[1.0, 2.0], F=-0.5, a=1.0, l_0=1.2, k=3.0, m=1.0, c=0.5)
     cardillo_interface = TrussCardilloSkhipprInterface(cardillo_system, -0.5)
     cardillo_interface.param = 0.0
 
     solver = NewtonSolver(verbose=True)
 
-    # --- or passed to a solver directly using a different method ---
+    # --- solve static equilibrium as initial condition ---
     solver.solve_equation(equation=cardillo_interface, unknown="x")
 
     # --- Try HBM ---
-    n_hbm = 5
-    l_dft = 2048
+    n_hbm = 2
+    l_dft = 512
     fourier = Fourier(
         n_hbm,
         l_dft,
@@ -323,6 +310,7 @@ def main():
     # plot_period(hbm_dae)
     # plot_phase(hbm_dae, [0, cardillo_interface._nq])
 
+    return
     # # --- or passed to a solver directly using a different method ---
     # solver.solve_equation(equation=hbm_dae, unknown="X")
 
