@@ -269,7 +269,7 @@ def main():
     # --- Instantiation of the DAE at initial point ---
     # ode = Truss(x=[1.0, 2.0], F=-0.5, a=1.0, l_0=1.2, k=3.0, m=1.0, c=0.5)
     cardillo_interface = TrussCardilloSkhipprInterface(cardillo_system, -0.5)
-    cardillo_interface.param = 0.5
+    cardillo_interface.param = 0.0
 
     solver = NewtonSolver(verbose=True)
 
@@ -278,8 +278,11 @@ def main():
     solver.solve_equation(equation=cardillo_interface, unknown="x")
 
     # --- Plot static equilibrium ---
-    plot_equilibrium(ode=cardillo_interface, idx=[0, cardillo_interface.n_dof - 5])
-    plot_eigenvalues(ode=cardillo_interface)
+    plot_equilibrium(
+        ode=cardillo_interface,
+        idx=[0, cardillo_interface.n_dof - 5],
+        title="initial equilibrium",
+    )
 
     # --- Try HBM ---
     n_hbm = 2
@@ -311,21 +314,15 @@ def main():
     )
     solver.solve(equation_sys)
 
-    plot_period(hbm_dae)
-    plot_phase(hbm_dae, idx=[0, cardillo_interface._nq])
-
-    # # --- or passed to a solver directly using a different method ---
-    # solver.solve_equation(equation=hbm_dae, unknown="X")
-
-    # # --- Standard SKHiPPR visualization calls create and return new figures for each plot ---
-    # plot_equilibrium(ode=cardillo_interface, idx=[0, cardillo_interface.n_dof - 5])
-
-    # # --- SKHiPPR visualization methods accept EquationSystem objects that contain an AbstractODE as well ---
-    # plot_eigenvalues(ode=equation_sys)
+    plot_period(hbm_dae, title=f"initial periodic solution (param = {hbm_dae.param})")
+    plot_phase(
+        hbm_dae,
+        idx=[0, cardillo_interface._nq],
+        title=f"initial periodic solution (param = {hbm_dae.param})",
+    )
 
     branch: list[BranchPoint] = []
 
-    return
     # --- Iterate through the branch ---
     for branch_point in pseudo_arclength_continuator(
         initial_system=equation_sys,
@@ -343,10 +340,16 @@ def main():
             break
 
     def plot_fun(bp):
-        return (bp.equations[0].x[0], bp.equations[0].x[cardillo_interface.n_dof - 5])
+        return (bp.equations[0].param, bp.equations[0].X[cardillo_interface.n_dof])
 
     # --- Plot the continuation curve ---
-    plot_continuation(branch, marker="x", plot_fun=plot_fun)
+    plot_continuation(
+        branch,
+        marker="x",
+        plot_fun=plot_fun,
+        xlabel="parameter (F)",
+        ylabel="1st cosine amplitude of q",
+    )
 
 
 if __name__ == "__main__":

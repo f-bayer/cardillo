@@ -79,112 +79,20 @@ class HBMEquationDAE(HBMEquation):
         )
         return derivative
 
+    @override
+    def dR_dvar(self, variable, X=None) -> np.ndarray:
+        """
+        Overwrite the HBM during finite differences
+        """
+
+        try:
+            return super().dR_dvar(variable, X)
+        except (
+            ValueError
+        ):  # vectorization didn't work - use finite differences immediately in the freq domain
+            return self.finite_difference_derivative(variable, h_step=1e-4)
+
     def error_bound_fundamental_matrix(self, t=None, _as=None, bs=None):
         raise NotImplementedError(
             "Error bounds for the fundamental matrix not applicable to DAEs."
         )
-
-
-class HBMSystem(EquationSystem):
-    """This subclass of :py:class:`~skhippr.equations.EquationSystem.EquationSystem` instantiates a :py:class:`~skhippr.cycles.hbm.HBMEquation` and considers it as the first equation. The Fourier coefficient vector ``X`` is the first unknown.
-
-    If the underlying ODE is autonomous, the frequency ``omega`` of the periodic solution is not known in advance and is appended to the unknowns. Correspondingly, a :py:class:`~skhippr.cycles.hbm.HBMPhaseAnchor` equation is appended to the equations.
-    """
-
-    def __init__(
-        self,
-        ode,
-        omega,
-        fourier,
-        initial_guess: np.ndarray = None,
-        period_k: float = 1,
-        stability_method: "AbstractStabilityHBM" = None,
-        harmo_anchor: int = 1,
-        dof_anchor: int = 0,
-    ):
-        hbm = HBMEquation(
-            ode,
-            omega,
-            fourier,
-            initial_guess,
-            period_k,
-            stability_method=stability_method,
-        )
-
-        equations = [hbm]
-        unknowns = ["X"]
-
-        if ode.autonomous:
-            unknowns.append("omega")
-            anchor_equation = HBMPhaseAnchor(
-                fourier=hbm.fourier, X=hbm.X, harmo=harmo_anchor, dof=dof_anchor
-            )
-            equations.append(anchor_equation)
-
-        super().__init__(
-            equations=equations, unknowns=unknowns, equation_determining_stability=hbm
-        )
-
-
-class HBMPhaseAnchor(AbstractEquation):
-    """This class implements an anchor equation for the harmonic balance method (HBM) in autonomous systems to ensure that the phase of a specified degree of freedom and harmonic of the periodic solution does not change during the HBM solution procedure.
-
-    * Complex formulation:
-        exp(i*phi) = X+/X- = const
-    * Real formulation:
-        -tan(phi) = c_k/s_k = const
-
-    Hereby, ``harmo`` and ``dof``   specify the harmonic and degree of freedom for which the phase is anchored.
-
-    """
-
-    def __init__(self, fourier, X, harmo, dof):
-        super().__init__(None)
-        self.X = X
-        self.idx_anchor = self._determine_anchor(fourier, harmo, dof)
-        self.anchor = np.zeros((1, X.size), dtype=X.dtype)
-        self.anchor[0, self.idx_anchor[0]] = -1
-        # self.phase_required = self.X[self.idx_anchor[0]] / self.X[self.idx_anchor[1]]
-
-    def residual_function(self):
-        """Always returns zero."""
-        # anchor equation (phase may not change):
-        # delta X[anchor[0]] = X[anchor[0]]/X[anchor[1]] * delta X[anchor[1]]
-
-        # phase = self.X[self.idx_anchor[0]] / self.X[self.idx_anchor[1]]
-        # return phase - self.phase_required
-        return np.atleast_1d(0)
-
-    def closed_form_derivative(self, variable):
-        """Return the anchor as derivative w.r.t ``X`` and zero otherwise."""
-        if variable == "X":
-            self.anchor[0, self.idx_anchor[1]] = (
-                self.X[self.idx_anchor[0]] / self.X[self.idx_anchor[1]]
-            )
-            return self.anchor
-        else:
-            return np.atleast_2d(0)
-
-    def _determine_anchor(self, fourier, harmo: int = 1, dof: int = 0) -> np.ndarray:
-        """Determine the index of the anchor equation.
-        The anchor equation ensures that the phase of the  harmo-th harmonic
-        and the dof-th degree of freedom does not change during HBM solution for autonomous systems.
-        """
-        if fourier.real_formulation:
-            # -tan(phi) = c_k/s_k = const -->  delta c = c_k/s_k * delta s
-            idx_anchor = [
-                harmo * fourier.n_dof + dof,
-                (harmo + fourier.N_HBM) * fourier.n_dof + dof,
-            ]
-        else:
-            # exp(i*phi) = X+/X- = const -->  delta X+ = X+/X- * delta X-
-            idx_anchor = [
-                (fourier.N_HBM + harmo) * fourier.n_dof + dof,
-                (fourier.N_HBM - harmo) * fourier.n_dof + dof,
-            ]
-
-        # Avoid division by zero
-        if abs(self.X[idx_anchor[1]]) < (1e-4 * abs(self.X[idx_anchor[0]])):
-            idx_anchor.reverse()
-
-        return np.array(idx_anchor)
