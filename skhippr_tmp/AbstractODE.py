@@ -47,6 +47,7 @@ class AbstractDAE(AbstractODE):
     ):
 
         super().__init__(autonomous, n_dof, stability_method)
+        self.stability_method = stability_method
         self.M_is_constant = M_is_constant
         self.invertible = invertible
 
