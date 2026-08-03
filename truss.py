@@ -274,7 +274,12 @@ def main():
     solver = NewtonSolver(verbose=True)
 
     # --- solve static equilibrium as initial condition ---
+    print("Solving static equilibrium as initial condition...")
     solver.solve_equation(equation=cardillo_interface, unknown="x")
+
+    # --- Plot static equilibrium ---
+    plot_equilibrium(ode=cardillo_interface, idx=[0, cardillo_interface.n_dof - 5])
+    plot_eigenvalues(ode=cardillo_interface)
 
     # --- Try HBM ---
     n_hbm = 2
@@ -306,11 +311,9 @@ def main():
     )
     solver.solve(equation_sys)
 
-    # TODO: fix bug below before use
     plot_period(hbm_dae)
     plot_phase(hbm_dae, idx=[0, cardillo_interface._nq])
 
-    return
     # # --- or passed to a solver directly using a different method ---
     # solver.solve_equation(equation=hbm_dae, unknown="X")
 
@@ -322,6 +325,7 @@ def main():
 
     branch: list[BranchPoint] = []
 
+    return
     # --- Iterate through the branch ---
     for branch_point in pseudo_arclength_continuator(
         initial_system=equation_sys,
