@@ -307,8 +307,8 @@ def main():
     solver.solve(equation_sys)
 
     # TODO: fix bug below before use
-    # plot_period(hbm_dae)
-    # plot_phase(hbm_dae, [0, cardillo_interface._nq])
+    plot_period(hbm_dae)
+    plot_phase(hbm_dae, idx=[0, cardillo_interface._nq])
 
     return
     # # --- or passed to a solver directly using a different method ---
