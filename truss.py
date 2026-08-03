@@ -269,7 +269,7 @@ def main():
     # --- Instantiation of the DAE at initial point ---
     # ode = Truss(x=[1.0, 2.0], F=-0.5, a=1.0, l_0=1.2, k=3.0, m=1.0, c=0.5)
     cardillo_interface = TrussCardilloSkhipprInterface(cardillo_system, -0.5)
-    cardillo_interface.param = 0.0
+    cardillo_interface.param = 0.5
 
     solver = NewtonSolver(verbose=True)
 
