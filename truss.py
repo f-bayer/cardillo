@@ -5,6 +5,7 @@ Find and plot the equilibrium of the Truss system using SKHiPPR.
 
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 # --- Solver ---
 from skhippr.equations.EquationSystem import EquationSystem
@@ -30,6 +31,8 @@ from cardillo.constraints._base import ProjectedPositionOrientationBase
 from cardillo.force_laws import Spring, KelvinVoigtElement
 from cardillo.interactions import TwoPointInteraction
 from cardillo.forces import Force
+
+from cardillo.solver.skhippr import SkhipprStaticContinuation
 
 
 class TrussSubSystem:
@@ -253,16 +256,24 @@ def main():
 
     # force
     force = Force(np.zeros(3), rb)
+    force = Force(lambda t: np.array([-0.5 + t, 0.0, 0.0]), rb)
 
     cardillo_system.add(rb, con, spring, damper, force)
 
-    # handle force parameter update for skhippr
-    def set_force_parameter(F):
-        force.force = lambda t, F=F: np.array([F * np.sin(2 * np.pi * t) - 0.5, 0, 0])
+    # # handle force parameter update for skhippr
+    # def set_force_parameter(F):
+    #     force.force = lambda t, F=F: np.array([F * np.sin(2 * np.pi * t) - 0.5, 0, 0])
 
-    force.set_parameter = set_force_parameter
+    # force.set_parameter = set_force_parameter
 
     cardillo_system.assemble()
+
+    cardillo_solver = SkhipprStaticContinuation(cardillo_system)
+    sol = cardillo_solver.solve()
+
+    # vtk-export
+    dir_name = Path(__file__).parent
+    cardillo_system.export(dir_name, "vtk", sol)
 
     # truss_interface = TrussCardilloSkhipprInterface(cardillo_system)
 

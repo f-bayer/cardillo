@@ -215,7 +215,13 @@ class Export:
         file_name = self.__unique_file_name(contr_name)
         for i, sol_i in enumerate(self.solution):
             file_i = self.path / f"{file_name}_{i}.vtu"
-            self.__write_time_step_and_name(sol_i.t, file_i)
+
+            # to avoid non-monotonous time from skhippr continuation
+            try:
+                t_export = sol_i.t_export
+            except AttributeError:
+                t_export = sol_i.t
+            self.__write_time_step_and_name(t_export, file_i)
 
             points, cells, point_data, cell_data = export(sol_i, **kwargs)
 

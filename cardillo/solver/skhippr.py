@@ -1,0 +1,257 @@
+import numpy as np
+
+from cardillo.solver.solution import Solution
+
+# --- Solver ---
+from skhippr.equations.EquationSystem import EquationSystem
+from skhippr.solvers.newton import NewtonSolver
+from skhippr_tmp.AbstractODE import AbstractDAE
+
+# --- Continuation ---
+from skhippr.solvers.continuation import pseudo_arclength_continuator
+from skhippr.Fourier import Fourier
+from skhippr_tmp.hbm import HBMEquationDAE
+
+
+class CardilloSkhipprInterface(AbstractDAE):
+    def __init__(self, cardillo_system, param=None):
+        self.split_x = np.cumsum(
+            np.array(
+                [
+                    cardillo_system.nq,
+                    cardillo_system.nu,
+                    cardillo_system.nla_g,
+                    cardillo_system.nla_S,
+                ],
+                dtype=int,
+            )
+        )
+
+        n_dof = self.split_x[-1]
+        self.split_x = self.split_x[:-1]
+
+        super().__init__(
+            autonomous=True,
+            n_dof=n_dof,
+            stability_method=None,
+            M_is_constant=True,
+            invertible=True,
+        )
+
+        assert cardillo_system.nla_gamma == 0
+        assert cardillo_system.nla_c == 0
+        assert cardillo_system.nla_tau == 0
+        assert cardillo_system.ntau == 0
+        assert cardillo_system.nla_N == 0
+        assert cardillo_system.nla_F == 0
+
+        self.t = cardillo_system.t0
+        la_S0 = np.zeros(cardillo_system.nla_S)
+        self.x = np.concatenate(
+            [cardillo_system.q0, cardillo_system.u0, cardillo_system.la_g0, la_S0]
+        )
+        self.cardillo_system = cardillo_system
+        self._nq = cardillo_system.nq
+        self._nu = cardillo_system.nu
+
+        if param is not None:
+            self._param = param
+            self.param = param
+
+    @property
+    def param(self):
+        return self._param
+
+    @param.setter
+    def param(self, value):
+        self._param = value
+        self.cardillo_system.set_parameter(value)
+
+    def M_small(self, t=None, x=None):
+        if x is None:
+            x = self.x
+        if t is None:
+            t = self.t
+        t = float(np.squeeze(t))
+        self.check_dimensions(t, x)
+        M_ret = np.zeros((self.n_dof, self.n_dof))
+
+        q = x[: self._nq]
+
+        M = self.cardillo_system.M(t, q).toarray()
+
+        M_ret[: self.split_x[0], : self.split_x[0]] = np.eye(self._nq)
+
+        M_ret[self.split_x[0] : self.split_x[1], self.split_x[0] : self.split_x[1]] = M
+
+        return M_ret
+
+    def dynamics(self, t=None, x=None):
+        if x is None:
+            x = self.x
+        if t is None:
+            t = self.t
+        t = float(np.squeeze(t))
+        self.check_dimensions(t, x)
+
+        q, u, la_g, la_S = np.array_split(x, self.split_x)
+
+        q_dot = (
+            self.cardillo_system.q_dot(t, q, u)
+            + self.cardillo_system.g_S_q(t, q, format="csc").T @ la_S
+        )
+        W_g = self.cardillo_system.W_g(t, q, format="csr")
+
+        h = self.cardillo_system.h(t, q, u) + W_g @ la_g
+        g = self.cardillo_system.g(t, q)
+        g_S = self.cardillo_system.g_S(t, q)
+        return np.concatenate([q_dot, h, g, g_S])
+
+    def df_dx(self, t=None, x=None):
+        if x is None:
+            x = self.x
+        if t is None:
+            t = self.t
+        t = float(np.squeeze(t))
+
+        q, u, la_g, la_S = np.array_split(x, self.split_x)
+        W_g = self.cardillo_system.W_g(t, q).toarray()
+
+        g_S_q = self.cardillo_system.g_S_q(t, q)
+        f_x = np.zeros((self.n_dof, self.n_dof))
+        split_x = self.split_x
+        # TODO: the derivative of g_S_q.T @ la_S w.r.t q is missing below
+        f_x[: split_x[0], : split_x[0]] = self.cardillo_system.q_dot_q(
+            t, q, u
+        ).toarray()
+        f_x[: split_x[0], split_x[0] : split_x[1]] = self.cardillo_system.q_dot_u(
+            t, q
+        ).toarray()
+        f_x[: split_x[0], split_x[2] :] = g_S_q.T.toarray()
+        f_x[split_x[0] : split_x[1], : split_x[0]] = (
+            self.cardillo_system.h_q(t, q, u).toarray()
+            + self.cardillo_system.Wla_g_q(t, q, la_g).toarray()
+        )
+        f_x[split_x[0] : split_x[1], split_x[0] : split_x[1]] = (
+            self.cardillo_system.h_u(t, q, u).toarray()
+        )
+        f_x[split_x[0] : split_x[1], split_x[1] : split_x[2]] = W_g
+        f_x[split_x[1] : split_x[2], : split_x[0]] = self.cardillo_system.g_q(
+            t, q
+        ).toarray()
+        f_x[split_x[2] :, : split_x[0]] = g_S_q.toarray()
+        return f_x
+
+    def closed_form_derivative(self, variable, t=None, x=None):
+
+        if x is None:
+            x = self.x
+
+        self.check_dimensions(t=t, x=x)
+
+        match variable:
+            case "x":
+                return self.df_dx(t, x)
+            # case "t":
+            #     return np.array([[0.0], [1.0]])
+
+            # case "F":
+            #     return self.df_dF(x)
+            # case "k":
+            #     return self.df_dk(x)
+            # case "c":
+            #     return self.df_dc(x)
+            case _:
+                raise NotImplementedError(
+                    f"Derivative w.r.t {variable} not implemented in closed form."
+                )
+
+    def unpack(self, t=None, x=None):
+        if x is None:
+            x = self.x
+        if t is None:
+            t = self.t
+        t = float(np.squeeze(t))
+        self.check_dimensions(t, x)
+
+        q, u, la_g, la_S = np.array_split(x, self.split_x)
+        u_dot = None
+        la_gamma = None
+        la_c = None
+        la_N = None
+        la_F = None
+
+        return dict(
+            t=t,
+            q=q,
+            u=u,
+            u_dot=u_dot,
+            la_g=la_g,
+            la_gamma=la_gamma,
+            la_c=la_c,
+            la_N=la_N,
+            la_F=la_F,
+        )
+
+
+class SkhipprStaticContinuation:
+    def __init__(
+        self,
+        cardillo_system,
+        t1=1.0,
+        skhippr_solver: NewtonSolver = None,
+        min_step_size=0.001,
+        max_step_size=0.01,
+        verbose=True,
+    ):
+        self.system = cardillo_system
+        self.t0 = cardillo_system.t0
+        self.t1 = t1
+        self.min_step_size = min_step_size
+        self.max_step_size = max_step_size
+        self.verbose = verbose
+
+        self.interface = CardilloSkhipprInterface(cardillo_system, None)
+        self.interface.t = self.t0
+
+        self.equation_sys = EquationSystem(
+            equations=[self.interface],
+            unknowns=["x"],
+            equation_determining_stability=None,
+        )
+
+        if skhippr_solver is None:
+            skhippr_solver = NewtonSolver(verbose=False)
+        self.skhippr_solver = skhippr_solver
+
+    def solve(self):
+        if self.t1 == self.t0:
+            self.skhippr_solver.solve(self.equation_sys)
+            assert self.equation_sys.solved
+            results = [self.interface.unpack()]
+
+        else:
+            results = []
+            branch = []
+
+            # --- Iterate through the branch ---
+            for branch_point in pseudo_arclength_continuator(
+                initial_system=self.equation_sys,
+                solver=self.skhippr_solver,
+                stepsize=self.max_step_size,
+                stepsize_range=(self.min_step_size, self.max_step_size),
+                continuation_parameter="t",
+                initial_direction=(self.t1 - self.t0),
+                verbose=self.verbose,
+                num_steps=np.inf,
+            ):
+                branch.append(branch_point)
+                results.append(self.interface.unpack(branch_point.t, branch_point.x))
+                # break if t exceeds maximum
+                if branch_point.t >= self.t1:
+                    break
+
+        # create cardillo solution
+        results = {key: np.array([r[key] for r in results]) for key in results[0]}
+        results["t_export"] = np.arange(len(results["t"]))
+        return Solution(self.system, **results)
