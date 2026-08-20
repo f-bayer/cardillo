@@ -25,14 +25,14 @@ from skhippr_tmp.hbm import HBMEquationDAE
 
 
 from cardillo import System
-from cardillo.discrete import RigidBody, PointMass
+from cardillo.discrete import RigidBody, PointMass, Box
 from cardillo.constraints import Prismatic
 from cardillo.constraints._base import ProjectedPositionOrientationBase
 from cardillo.force_laws import Spring, KelvinVoigtElement
 from cardillo.interactions import TwoPointInteraction
 from cardillo.forces import Force
 
-from cardillo.solver.skhippr import SkhipprStaticContinuation
+from cardillo.solver.skhippr import SkhipprStaticContinuation, SkhipprHBM
 
 
 class TrussSubSystem:
@@ -239,7 +239,7 @@ def main():
     # rb = PointMass(mass=mass)
     # con = ProjectedPositionOrientationBase(cardillo_system.origin, rb, [1, 2], [])
 
-    rb = RigidBody(mass, B_Theta_C=np.eye(3))
+    rb = Box(RigidBody)([0.1, 0.1, 0.1], mass=mass, B_Theta_C=np.eye(3))
     con = Prismatic(cardillo_system.origin, rb, axis=0)
 
     # spring
@@ -255,25 +255,51 @@ def main():
     damper = KelvinVoigtElement(inter_damper, k=0.0, d=d_damper, compliance_form=False)
 
     # force
-    force = Force(np.zeros(3), rb)
-    force = Force(lambda t: np.array([-0.5 + t, 0.0, 0.0]), rb)
+    static_continuation = True
+    static_continuation = False
+
+    if static_continuation:
+        force = Force(lambda t: np.array([-0.5 + t, 0.0, 0.0]), rb)
+    else:
+        omega = 2 * np.pi
+        omega = 0.01
+        force = Force(np.zeros(3), rb)
+
+        # handle force parameter update for skhippr
+        def set_force_parameter(F):
+            force.force = lambda t, F=F: np.array([F * np.sin(omega * t) - 0.5, 0, 0])
+
+        force.set_parameter = set_force_parameter
+        force.set_parameter(0.5)
 
     cardillo_system.add(rb, con, spring, damper, force)
 
-    # # handle force parameter update for skhippr
-    # def set_force_parameter(F):
-    #     force.force = lambda t, F=F: np.array([F * np.sin(2 * np.pi * t) - 0.5, 0, 0])
-
-    # force.set_parameter = set_force_parameter
-
     cardillo_system.assemble()
 
-    cardillo_solver = SkhipprStaticContinuation(cardillo_system)
-    sol = cardillo_solver.solve()
+    if static_continuation:
+        cardillo_solver = SkhipprStaticContinuation(cardillo_system)
+    else:
+        cardillo_solver = SkhipprHBM(cardillo_system, omega)
+
+    sol, skhippr_sol = cardillo_solver.solve()
 
     # vtk-export
     dir_name = Path(__file__).parent
     cardillo_system.export(dir_name, "vtk", sol)
+
+    if static_continuation:
+        plot_continuation(skhippr_sol)
+    else:
+        plot_period(skhippr_sol, title=f"initial periodic solution")
+        plot_phase(
+            skhippr_sol,
+            idx=[0, cardillo_system.nq],
+            title=f"initial periodic solution",
+        )
+
+    plt.show()
+
+    exit()
 
     # truss_interface = TrussCardilloSkhipprInterface(cardillo_system)
 
@@ -311,7 +337,7 @@ def main():
 
     hbm_dae = HBMEquationDAE(
         cardillo_interface,
-        2 * np.pi,
+        omega,
         fourier,
         initial_guess=initial_guess,
         stability_method=None,

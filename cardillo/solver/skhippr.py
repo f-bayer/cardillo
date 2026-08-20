@@ -228,6 +228,7 @@ class SkhipprStaticContinuation:
         if self.t1 == self.t0:
             self.skhippr_solver.solve(self.equation_sys)
             assert self.equation_sys.solved
+            branch = [self.equation_sys]
             results = [self.interface.unpack()]
 
         else:
@@ -254,4 +255,64 @@ class SkhipprStaticContinuation:
         # create cardillo solution
         results = {key: np.array([r[key] for r in results]) for key in results[0]}
         results["t_export"] = np.arange(len(results["t"]))
-        return Solution(self.system, **results)
+        return Solution(self.system, **results), branch
+
+
+class SkhipprHBM:
+    def __init__(
+        self,
+        cardillo_system,
+        omega,
+        N_HBM=5,
+        L_DFT=512,
+        initial_guess_time=None,
+        skhippr_solver: NewtonSolver = None,
+        newton_max_iter=20,
+        verbose=True,
+    ):
+        self.system = cardillo_system
+        self.L_DFT = L_DFT
+
+        self.verbose = verbose
+
+        self.interface = CardilloSkhipprInterface(cardillo_system, None)
+
+        fourier = Fourier(
+            N_HBM,
+            L_DFT,
+            self.interface.n_dof,
+        )
+
+        if initial_guess_time is None:
+            initial_guess = np.zeros(self.interface.n_dof * (2 * N_HBM + 1))
+            initial_guess[: self.interface.n_dof] = self.interface.x
+        else:
+            # TODO: initial_guess as cardillo solution for one period
+            # initial_guess_time: np.ndarray(self.interface.n_dof, L_DFT)
+            initial_guess = fourier.DFT(initial_guess_time)
+
+        self.hbm = HBMEquationDAE(
+            self.interface,
+            omega,
+            fourier,
+            initial_guess=initial_guess,
+            stability_method=None,  # TODO: KoopmanHillDAE
+        )
+
+        if skhippr_solver is None:
+            skhippr_solver = NewtonSolver(
+                max_iterations=newton_max_iter, verbose=verbose
+            )
+        self.skhippr_solver = skhippr_solver
+
+    def solve(self):
+        self.skhippr_solver.solve_equation(self.hbm, "X")
+
+        t = self.hbm.fourier.time_samples(self.hbm.omega)
+        x = self.hbm.x_time()
+
+        results = [self.interface.unpack(ti, xi) for ti, xi in zip(t, x.T)]
+
+        # create cardillo solution
+        results = {key: np.array([r[key] for r in results]) for key in results[0]}
+        return Solution(self.system, **results), self.hbm
