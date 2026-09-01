@@ -34,7 +34,7 @@ class CardilloSkhipprInterface(AbstractDAE):
             autonomous=True,
             n_dof=n_dof,
             stability_method=None,
-            M_is_constant=True,
+            M_is_constant=not np.any(cardillo_system.I_M),
             invertible=True,
         )
 
