@@ -278,10 +278,12 @@ def main():
 
     if static_continuation:
         cardillo_solver = SkhipprStaticContinuation(cardillo_system)
+
     elif hbm:
         cardillo_solver = SkhipprHBM(cardillo_system, omega)
 
         sol, skhippr_sol = cardillo_solver.solve()
+        print(skhippr_sol.eigenvalues)
 
         # vtk-export
         dir_name = Path(__file__).parent
@@ -305,7 +307,13 @@ def main():
         force.force = lambda t, F=F: np.array([F * np.sin(omega * t) - 0.5, 0, 0])
 
     solver = SkhipprHBMContinuation(
-        cardillo_system, omega, set_parameter, 0.0, 1.0, max_step_size=0.1
+        cardillo_system,
+        omega,
+        set_parameter,
+        0.0,
+        1.0,
+        max_step_size=0.03,
+        compute_stability=True,
     )
     solutions, branch = solver.solve()
 
@@ -321,7 +329,7 @@ def main():
         ylabel="amplitude of q[0]",
     )
 
-    animate_phase(branch, idx=[0, cardillo_system.nq], interval=60)
+    anim = animate_phase(branch, idx=[0, cardillo_system.nq], interval=60)
 
     plt.show()
 

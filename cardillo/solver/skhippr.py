@@ -17,8 +17,13 @@ from skhippr_tmp.hbm import HBMEquationDAE
 
 class CardilloSkhipprInterface(AbstractDAE):
     def __init__(
-        self, cardillo_system, set_parameter_function=lambda param: None, param=None
+        self,
+        cardillo_system,
+        autonomous,
+        set_parameter_function=lambda param: None,
+        param=None,
     ):
+        self.autonomous = autonomous
         self.split_x = np.cumsum(
             np.array(
                 [
@@ -35,11 +40,11 @@ class CardilloSkhipprInterface(AbstractDAE):
         self.split_x = self.split_x[:-1]
 
         super().__init__(
-            autonomous=True,
+            autonomous=autonomous,
             n_dof=n_dof,
             stability_method=None,
             M_is_constant=not np.any(cardillo_system.I_M),
-            invertible=True,
+            invertible=False,  # TODO: check for constraints, etc.
         )
 
         assert cardillo_system.nla_gamma == 0
@@ -231,7 +236,7 @@ class SkhipprStaticContinuation:
         self.max_step_size = max_step_size
         self.verbose = verbose
 
-        self.interface = CardilloSkhipprInterface(cardillo_system)
+        self.interface = CardilloSkhipprInterface(cardillo_system, True)
         self.interface.t = self.t0
 
         self.equation_sys = EquationSystem(
@@ -288,6 +293,7 @@ class SkhipprHBM:
         initial_guess_time=None,
         skhippr_solver: NewtonSolver = None,
         newton_max_iter=20,
+        compute_stability=False,
         verbose=True,
     ):
         self.system = cardillo_system
@@ -295,7 +301,7 @@ class SkhipprHBM:
 
         self.verbose = verbose
 
-        self.interface = CardilloSkhipprInterface(cardillo_system)
+        self.interface = CardilloSkhipprInterface(cardillo_system, False)
 
         fourier = Fourier(
             N_HBM,
@@ -311,13 +317,17 @@ class SkhipprHBM:
             # initial_guess_time: np.ndarray(self.interface.n_dof, L_DFT)
             initial_guess = fourier.DFT(initial_guess_time)
 
-        stability_method = KoopmanHillDAE(fourier)
+        stability_method = (
+            KoopmanHillDAE(fourier, autonomous=self.interface.autonomous)
+            if compute_stability
+            else None
+        )
         self.hbm = HBMEquationDAE(
             self.interface,
             omega,
             fourier,
             initial_guess=initial_guess,
-            stability_method=None,  # TODO: KoopmanHillDAE
+            stability_method=stability_method,
         )
 
         if skhippr_solver is None:
@@ -355,6 +365,7 @@ class SkhipprHBMContinuation:
         skhippr_solver: NewtonSolver = None,
         newton_max_iter=20,
         verbose=True,
+        compute_stability=False,
         parameter_is_omega=False,
     ):
         assert not parameter_is_omega, "TODO"
@@ -364,7 +375,7 @@ class SkhipprHBMContinuation:
         self.verbose = verbose
 
         self.interface = CardilloSkhipprInterface(
-            cardillo_system, set_parameter_function, start_param
+            cardillo_system, False, set_parameter_function, start_param
         )
         self.start_param = start_param
         self.end_param = end_param
@@ -386,12 +397,17 @@ class SkhipprHBMContinuation:
             # initial_guess_time: np.ndarray(self.interface.n_dof, L_DFT)
             initial_guess = fourier.DFT(initial_guess_time)
 
+        stability_method = (
+            KoopmanHillDAE(fourier, autonomous=self.interface.autonomous)
+            if compute_stability
+            else None
+        )
         hbm = HBMEquationDAE(
             self.interface,
             omega,
             fourier,
             initial_guess=initial_guess,
-            stability_method=None,  # TODO: KoopmanHillDAE
+            stability_method=stability_method,
         )
 
         self.hbm = EquationSystem(

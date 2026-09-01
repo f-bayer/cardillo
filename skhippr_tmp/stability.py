@@ -3,6 +3,7 @@ from typing import override
 import numpy as np
 from scipy.linalg import (
     expm,
+    schur,
     lu_factor,
     lu_solve,
     solve_sylvester,
