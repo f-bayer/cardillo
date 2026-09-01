@@ -7,6 +7,7 @@ from cardillo.solver.solution import Solution
 from skhippr.equations.EquationSystem import EquationSystem
 from skhippr.solvers.newton import NewtonSolver
 from skhippr_tmp.AbstractODE import AbstractDAE
+from skhippr_tmp.stability import KoopmanHillDAE
 
 # --- Continuation ---
 from skhippr.solvers.continuation import pseudo_arclength_continuator
@@ -310,6 +311,7 @@ class SkhipprHBM:
             # initial_guess_time: np.ndarray(self.interface.n_dof, L_DFT)
             initial_guess = fourier.DFT(initial_guess_time)
 
+        stability_method = KoopmanHillDAE(fourier)
         self.hbm = HBMEquationDAE(
             self.interface,
             omega,

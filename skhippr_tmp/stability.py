@@ -3,17 +3,11 @@ from typing import override
 import numpy as np
 from scipy.linalg import (
     expm,
-    schur,
-    solve_triangular,
     lu_factor,
     lu_solve,
     solve_sylvester,
-    qr,  # scipy qr decomposition allows for pivoting and rank-reveal, numpy does not
+    solve_triangular,
 )
-
-from skhippr.Fourier import Fourier
-from skhippr.cycles.hbm import HBMEquation, HBMEquationDAE
-from skhippr.stability.AbstractStabilityHBM import AbstractStabilityHBM
 
 
 class KoopmanHillDAE(KoopmanHillProjection):
@@ -22,9 +16,7 @@ class KoopmanHillDAE(KoopmanHillProjection):
         self.tol_drazin = tol_drazin
 
     @override
-    def fundamental_matrix(
-        self, t_over_period, hbm: HBMEquationDAE, omega=None, update=True
-    ):
+    def fundamental_matrix(self, t_over_period, hbm, omega=None, update=True):
         C = self.C_time(t_over_period)
         hill_matrix = hbm.hill_matrix(update=update)
 
@@ -101,6 +93,77 @@ def drazin(A, tol=0, ax_plot=None, x_value=None):
 
         W_nz = solve_sylvester(R, -N, -C)
         W[:n_cutoff, n_cutoff:] = W_nz
+
+
+def drazin_schur_2(A, tol=0, ax_plot=None, x_value=None):
+    """Compute the Drazin inverse of a matrix A.
+
+    Parameters
+    ----------
+    A : np.ndarray
+        The input square matrix.
+    tol : float, optional
+        Tolerance for determining the rank (default is 0).
+    x_value: float, optional
+        x value(s) to plot the eigenvalues at, if multiple cases are to be compared in one plot.
+        If None (default), the eigenvalues are plotted at their index
+    Returns
+    -------
+    np.ndarray
+        The Drazin inverse of the matrix A.
+    """
+    n = A.shape[0]
+
+    T, Z, n_cutoff = schur(A, output="complex", sort=lambda x: abs(x) > tol)
+
+    if ax_plot is not None:
+        eigenvalues = np.diag(T)
+
+        if x_value is None:
+            x_vals = np.arange(len(eigenvalues))
+        else:
+            x_vals = x_value * np.ones_like(eigenvalues)
+        # eigenvalues_plot = np.zeros_like(eigenvalues)
+        # for k, eigenvalue in enumerate(eigenvalues):
+        #     eigenvalues_plot[k] = round_to_significant_digits(eigenvalue, 2)
+
+        # _, idx_unique = np.unique(eigenvalues_plot, return_index=True)
+        ax_plot.semilogy(
+            x_vals,
+            np.abs(eigenvalues),  # [idx_unique]),
+            "x",
+        )
+
+    R = T[:n_cutoff, :n_cutoff]
+    N = T[n_cutoff:, n_cutoff:]
+    C = T[:n_cutoff, n_cutoff:]
+
+    W = np.eye(n, dtype=complex)
+
+    if np.linalg.norm(C, np.inf) > tol:
+        print(
+            "Drazin inverse computation: Non-zero coupling block detected. Using Sylvester."
+        )
+
+        W_nz = solve_sylvester(R, -N, -C)
+        W[:n_cutoff, n_cutoff:] = W_nz
+
+    # if np.max(np.abs(np.linalg.eig(N)[0])) > tol:
+    #     warnings.warn(
+    #         "Drazin inverse computation: Non-nilpotent block detected. Results may be inaccurate."
+    #     )
+
+    # if np.linalg.norm(Z @ Z.T.conj() - np.eye(n), np.inf) > tol:
+    #     warnings.warn(
+    #         "Drazin inverse computation: Schur vectors are not unitary. Results may be inaccurate."
+    #     )
+
+    drazin_schur = np.zeros_like(T)
+    drazin_schur[:n_cutoff, :n_cutoff] = solve_triangular(
+        R, np.eye(n_cutoff), lower=False
+    )
+
+    return Z @ W @ drazin_schur @ solve_triangular(W, Z.T.conj()), n - n_cutoff
 
 
 def generalized_exponential(
