@@ -19,7 +19,7 @@ from skhippr.solvers.continuation import pseudo_arclength_continuator, BranchPoi
 # --- Visualization ---
 from skhippr.visualization.continuation import plot_continuation
 from skhippr.visualization.equilibria import plot_equilibrium, plot_eigenvalues
-from skhippr.visualization.cycles import plot_period, plot_phase
+from skhippr.visualization.cycles import plot_period, plot_phase, animate_phase
 from skhippr.Fourier import Fourier
 from skhippr_tmp.hbm import HBMEquationDAE
 
@@ -32,7 +32,11 @@ from cardillo.force_laws import Spring, KelvinVoigtElement
 from cardillo.interactions import TwoPointInteraction
 from cardillo.forces import Force
 
-from cardillo.solver.skhippr import SkhipprStaticContinuation, SkhipprHBM
+from cardillo.solver.skhippr import (
+    SkhipprStaticContinuation,
+    SkhipprHBM,
+    SkhipprHBMContinuation,
+)
 
 
 class TrussSubSystem:
@@ -258,19 +262,15 @@ def main():
     static_continuation = True
     static_continuation = False
 
+    hbm = True
+    hbm = False
+
     if static_continuation:
         force = Force(lambda t: np.array([-0.5 + t, 0.0, 0.0]), rb)
     else:
         omega = 2 * np.pi
         omega = 0.01
-        force = Force(np.zeros(3), rb)
-
-        # handle force parameter update for skhippr
-        def set_force_parameter(F):
-            force.force = lambda t, F=F: np.array([F * np.sin(omega * t) - 0.5, 0, 0])
-
-        force.set_parameter = set_force_parameter
-        force.set_parameter(0.5)
+        force = Force(lambda t: np.array([0.5 * np.sin(omega * t) - 0.5, 0, 0]), rb)
 
     cardillo_system.add(rb, con, spring, damper, force)
 
@@ -278,24 +278,50 @@ def main():
 
     if static_continuation:
         cardillo_solver = SkhipprStaticContinuation(cardillo_system)
-    else:
+    elif hbm:
         cardillo_solver = SkhipprHBM(cardillo_system, omega)
 
-    sol, skhippr_sol = cardillo_solver.solve()
+        sol, skhippr_sol = cardillo_solver.solve()
 
-    # vtk-export
-    dir_name = Path(__file__).parent
-    cardillo_system.export(dir_name, "vtk", sol)
+        # vtk-export
+        dir_name = Path(__file__).parent
+        cardillo_system.export(dir_name, "vtk", sol)
 
-    if static_continuation:
-        plot_continuation(skhippr_sol)
-    else:
-        plot_period(skhippr_sol, title=f"initial periodic solution")
-        plot_phase(
-            skhippr_sol,
-            idx=[0, cardillo_system.nq],
-            title=f"initial periodic solution",
-        )
+        if static_continuation:
+            plot_continuation(skhippr_sol)
+        else:
+            plot_period(skhippr_sol, title=f"initial periodic solution")
+            plot_phase(
+                skhippr_sol,
+                idx=[0, cardillo_system.nq],
+                title=f"initial periodic solution",
+            )
+
+        plt.show()
+
+    # continuation with HBM
+    # update function for skhippr continuation
+    def set_parameter(F):
+        force.force = lambda t, F=F: np.array([F * np.sin(omega * t) - 0.5, 0, 0])
+
+    solver = SkhipprHBMContinuation(
+        cardillo_system, omega, set_parameter, 0.0, 1.0, max_step_size=0.1
+    )
+    solutions, branch = solver.solve()
+
+    def plot_fun(bp):
+        # maximum of q[0] over one period
+        return (bp.equations[0].param, np.max(bp.equations[0].x_time()[0, :]))
+
+    plot_continuation(
+        branch,
+        marker="x",
+        plot_fun=plot_fun,
+        xlabel="parameter (F)",
+        ylabel="amplitude of q[0]",
+    )
+
+    animate_phase(branch, idx=[0, cardillo_system.nq], interval=60)
 
     plt.show()
 
