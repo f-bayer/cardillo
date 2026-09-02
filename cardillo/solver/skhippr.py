@@ -6,13 +6,13 @@ from cardillo.solver.solution import Solution
 # --- Solver ---
 from skhippr.equations.EquationSystem import EquationSystem
 from skhippr.solvers.newton import NewtonSolver
-from skhippr_tmp.AbstractODE import AbstractDAE
-from skhippr_tmp.stability import KoopmanHillDAE
+from .skhippr_tmp.AbstractODE import AbstractDAE
+from .skhippr_tmp.stability import KoopmanHillDAE
 
 # --- Continuation ---
 from skhippr.solvers.continuation import pseudo_arclength_continuator
 from skhippr.Fourier import Fourier
-from skhippr_tmp.hbm import HBMEquationDAE
+from .skhippr_tmp.hbm import HBMEquationDAE
 
 
 class CardilloSkhipprInterface(AbstractDAE):

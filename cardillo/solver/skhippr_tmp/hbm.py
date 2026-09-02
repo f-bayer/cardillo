@@ -5,7 +5,7 @@ import numpy as np
 from skhippr.equations.AbstractEquation import AbstractEquation
 from skhippr.cycles.AbstractCycleEquation import AbstractCycleEquation
 from skhippr.odes.AbstractODE import AbstractODE
-from skhippr_tmp.AbstractODE import AbstractDAE
+from cardillo.solver.skhippr_tmp.AbstractODE import AbstractDAE
 from skhippr.cycles.hbm import HBMEquation
 from skhippr.Fourier import Fourier
 from skhippr.equations.EquationSystem import EquationSystem
